@@ -1,11 +1,13 @@
-from typing import List
+from typing import Union, List
 from pyspark.sql import SparkSession, DataFrame
+from pyspark.sql.functions import dense_rank, col, when
+from pyspark.sql.window import Window
 from pathlib import Path
 from functools import reduce
 import os
-import re
 from jobs.downloader import Downloader
 from jobs.actions import delete_, insert_, update_
+from jobs.utils import city_to_state, find_src_with_largest_version, get_login_rate, count_distinct
 
 
 class Job:
@@ -22,7 +24,7 @@ class Job:
             "cdc": "`action` STRING, `user_id` INT, `name` STRING, `city` STRING, `last_login` DATE"
         }
 
-    def get_src(self, type: str):
+    def get_src(self, type: str) -> Union[str, List[str]]:
         data_dir = Path().resolve() / "data"
         if not data_dir.exists():
             data_dir.mkdir(exist_ok=True, parents=True)
@@ -61,7 +63,7 @@ class Job:
         df_renamed = self.rename_cols(df, type)
         return df_renamed
 
-    def collect(self, type):
+    def collect(self, type) -> DataFrame:
         """
         for cdc data, union all files
         for main data, read the file with largest version number
@@ -73,14 +75,11 @@ class Job:
                 [self.read_df(src, type=type) for src in src_list]
             )
         elif type == "main":
-            version_dict = {
-                int(re.findall("\\d+", src)[0]): src for src in src_list}
-            max_version = max(version_dict.keys())
-            src = version_dict.get(max_version)
+            src = find_src_with_largest_version(src_list)
             data = self.read_df(src, type=type)
         return data
 
-    def update_main_data(self):
+    def update_main_data(self) -> DataFrame:
         cdc_data = self.collect("cdc")
         main_data = self.collect("main")
         for row in cdc_data.collect():
@@ -103,9 +102,33 @@ class Job:
                                       last_login=row["last_login"])
         return main_data
 
+    def prepare_main_data(self, main_data: DataFrame) -> DataFrame:
+        city_window = Window().partitionBy("city")
+        prepared_data = (main_data
+                         .withColumn(
+                             "city", when(col("city") == "Nashville-Davidson",
+                                          "Nashville").otherwise(col("city"))
+                         )
+                         .withColumn(
+                             "state", city_to_state(col("city"))
+                         )
+                         .withColumn(
+                             "last_login_rank_by_city", dense_rank().over(
+                                 city_window.orderBy(col("last_login").desc()))
+                         ).withColumn(
+                             "login_rate_last_3_months_by_city", get_login_rate(
+                                 col("last_login")).over(city_window)
+                         ).withColumn(
+                             "users_by_city", count_distinct(
+                                 col("user_id")).over(city_window)
+                         ).orderBy(col("city"), col("last_login_rank_by_city").desc())
+                         )
+        return prepared_data
+
 
 if __name__ == "__main__":
     job = Job()
     main_data_updated = job.update_main_data()
-    main_data_updated.show(10, False)
+    main_data_prepared = job.prepare_main_data(main_data_updated)
+    main_data_prepared.show(10, False)
     main_data_updated.write.csv("data/output", mode="overwrite")
