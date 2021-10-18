@@ -1,3 +1,4 @@
+from typing import List
 from pyspark.sql import SparkSession, DataFrame
 from pathlib import Path
 from functools import reduce
@@ -20,14 +21,17 @@ class Job:
             "cdc": "`action` STRING, `user_id` INT, `name` STRING, `city` STRING, `last_login` DATE"
         }
 
-    def get_src(self):
+    def get_src(self, type: str):
         if len(os.listdir("src/data")) == 0:
             d = Downloader
             d.download_data()
-        files = [f.name for f in self.data_dir.iterdir()]
-        self.main_data_src = "src/data/LOAD00000001.csv"
-        self.cdc_data_src = ["src/data/" +
-                             f for f in files if f != self.main_data_src]
+        files = ["src/data/" + f.name for f in self.data_dir.iterdir()]
+        if type == "main":
+            main_data_src = [f for f in files if "LOAD" in f]
+            return main_data_src
+        elif type == "cdc":
+            cdc_data_src = [f for f in files if "LOAD" not in f]
+            return cdc_data_src
 
     def rename_cols(self, df: DataFrame, type) -> DataFrame:
         if type == "main":
@@ -53,20 +57,17 @@ class Job:
         df_renamed = self.rename_cols(df, type)
         return df_renamed
 
-    def collect_cdc(self) -> DataFrame:
-        cdc_data = reduce(
+    def collect(self, type):
+        src_list = self.get_src(type)
+        data = reduce(
             lambda x, y: x.union(y),
-            [self.read_df(f, type="cdc") for f in self.cdc_data_src]
+            [self.read_df(src, type=type) for src in src_list]
         )
-        return cdc_data
-
-    def collect_main(self) -> DataFrame:
-        main_data = self.read_df(self.main_data_src, type="main")
-        return main_data
+        return data
 
     def update_main_data(self):
-        cdc_data = self.collect_cdc()
-        main_data = self.collect_main()
+        cdc_data = self.collect("cdc")
+        main_data = self.collect("main")
         for row in cdc_data.collect():
             action = row["action"]
             processor = self.actions.get(action)
@@ -90,6 +91,6 @@ class Job:
 
 if __name__ == "__main__":
     job = Job()
-    job.get_src()
     main_data_updated = job.update_main_data()
-    main_data_updated.show(20, False)
+    main_data_updated.show(10, False)
+    main_data_updated.write.csv("src/data/output", mode="overwrite")
