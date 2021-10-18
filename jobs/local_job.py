@@ -20,8 +20,8 @@ class Job:
             "D": delete_
         }
         self.schema = {
-            "main": "`user_id` INT, `name` STRING, `city` STRING, `last_login` DATE",
-            "cdc": "`action` STRING, `user_id` INT, `name` STRING, `city` STRING, `last_login` DATE"
+            "main": "`_c0` INT, `_c1` STRING, `_c2` STRING, `_c3` DATE",
+            "cdc": "`_c0` STRING, `_c1` INT, `_c2` STRING, `_c3` STRING, `_c4` DATE"
         }
 
     def get_src(self, type: str) -> Union[str, List[str]]:
