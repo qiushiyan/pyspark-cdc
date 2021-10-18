@@ -4,13 +4,13 @@ from pathlib import Path
 from functools import reduce
 import os
 import re
-from src.downloader import Downloader
-from src.actions import delete_, insert_, update_
+from jobs.downloader import Downloader
+from jobs.actions import delete_, insert_, update_
 
 
 class Job:
     def __init__(self):
-        self.data_dir = Path().resolve() / "src/data"
+        self.data_dir = Path().resolve() / "data"
         self.spark = SparkSession.builder.appName("cdc-pyspark").getOrCreate()
         self.actions = {
             "U": update_,
@@ -23,10 +23,13 @@ class Job:
         }
 
     def get_src(self, type: str):
-        if len(os.listdir("src/data")) == 0:
-            d = Downloader
+        data_dir = Path().resolve() / "data"
+        if not data_dir.exists():
+            data_dir.mkdir(exist_ok=True, parents=True)
+        if len(os.listdir("data")) == 0:
+            d = Downloader()
             d.download_data()
-        files = ["src/data/" + f.name for f in self.data_dir.iterdir()]
+        files = ["data/" + f.name for f in self.data_dir.iterdir()]
         if type == "main":
             main_data_src = [f for f in files if "LOAD" in f]
             return main_data_src
@@ -105,4 +108,4 @@ if __name__ == "__main__":
     job = Job()
     main_data_updated = job.update_main_data()
     main_data_updated.show(10, False)
-    main_data_updated.write.csv("src/data/output", mode="overwrite")
+    main_data_updated.write.csv("data/output", mode="overwrite")
