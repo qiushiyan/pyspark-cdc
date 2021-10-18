@@ -3,6 +3,7 @@ from pyspark.sql import SparkSession, DataFrame
 from pathlib import Path
 from functools import reduce
 import os
+import re
 from src.downloader import Downloader
 from src.actions import delete_, insert_, update_
 
@@ -58,11 +59,22 @@ class Job:
         return df_renamed
 
     def collect(self, type):
+        """
+        for cdc data, union all files
+        for main data, read the file with largest version number
+        """
         src_list = self.get_src(type)
-        data = reduce(
-            lambda x, y: x.union(y),
-            [self.read_df(src, type=type) for src in src_list]
-        )
+        if type == "cdc":
+            data = reduce(
+                lambda x, y: x.union(y),
+                [self.read_df(src, type=type) for src in src_list]
+            )
+        elif type == "main":
+            version_dict = {
+                int(re.findall("\\d+", src)[0]): src for src in src_list}
+            max_version = max(version_dict.keys())
+            src = version_dict.get(max_version)
+            data = self.read_df(src, type=type)
         return data
 
     def update_main_data(self):
