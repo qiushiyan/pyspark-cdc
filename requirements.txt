@@ -28,7 +28,6 @@ pyspark==3.2.0
 python-dateutil==2.8.2
 python-dotenv==0.19.1
 pytz==2021.3
-pywin32==302
 pyzmq==22.3.0
 s3transfer==0.5.0
 six==1.16.0
